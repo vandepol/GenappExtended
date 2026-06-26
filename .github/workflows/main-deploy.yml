@@ -1,0 +1,47 @@
+name: Deploy-Release-to-Prod
+env:
+    AppName: GenappExtended
+    DBB_Host: '"C:\Program Files\PuTTY\plink.exe" DMJTA1@WTSC47.CPOLAB.IBM.COM -pw ${{ secrets.WTSC47_PW }}'
+    MyHlq: DMJTA1.MAIN
+    BuildHome: /u/DMJTA1/zAppBuild
+    DBBRepo: git@github.com:jt-atkins/dbb-scripts-final.git
+    BUILDRepo: git@github.com:jt-atkins/dbb-zappbuild-final.git
+    MyRepo: git@github.com:${{ github.repository }}.git
+    MyBranch: main
+    MyWorkDir: /u/DMJTA1/zAppBuild/featurebuild/Genapp_run_${{ github.run_number }}
+    # MyWorkSpace: /u/DMJTA1/zAppBuild/featurebuild/Genapp_run_${{ github.run_number }}/GenappExtended
+    MyWorkSpace: /u/DMJTA1/zAppBuild/featurebuild/Genapp_run_${{ github.run_number }}
+    MyApplication: cics-genapp #application folder name under the working tree in the application Git repo
+    Clone: /u/DMJTA1/zAppBuild/scripts/git-clone-ssh.sh
+    DBB_Build: /u/DMJTA1/zAppBuild/scripts/dbb-build.sh
+    UCD_Package: /u/DMJTA1/zAppBuild/scripts/PublishUCD.sh
+    UCD_Deploy: /u/DMJTA1/zAppBuild/scripts/DeployUCD.sh
+    UCD_Server_URL: https://9.76.61.225:8443
+    UCD_AppProps: /u/DMJTA1/zAppBuild/dbb-zappbuild-final/GenappML2.properties
+    UCD_AppDeployProcess: Deploy
+    UCD_backendComponent: App1-Genapp-ZComponent
+    UCD_APIComponent: App1-Genapp-API
+    UCD_TestComponent: App1-Genapp-Test
+    UCDApplication: App1-Genapp
+    UCD_Dev_LPAR: 'DEV'
+    UCD_Test_LPAR: 'TEST'
+    UCD_Prod_LPAR: 'PROD'
+
+concurrency:
+    group: Main-Branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      ReleaseInput:
+        description: 'Enter your release package to deploy to Production'
+        required: true
+        default: 'vx.x.x'
+      
+jobs:
+  Release-Candidate-Build:
+    runs-on: build-runner1
+    steps:
+      - name: Deployment to Applications Prod LPAR  
+        run: ${{ env.DBB_Host }} ${{ env.UCD_Deploy }} ${{ env.UCDApplication }}  ${{ env.UCD_Prod_LPAR }} ${{ env.UCD_Server_URL }} ${{ env.UCD_backendComponent }}:${{ github.event.inputs.ReleaseInput }}  ${{ env.UCD_AppDeployProcess }} ${{ env.UCD_AppProps }}
+        shell: cmd 

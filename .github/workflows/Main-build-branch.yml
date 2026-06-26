@@ -1,0 +1,106 @@
+name: Main-Build
+env:
+    AppName: GenappML2
+    DBB_Host: '"C:\Program Files\PuTTY\plink.exe" DMJTA1@WTSC47.CPOLAB.IBM.COM -pw ${{ secrets.WTSC47_PW }}'
+    MyHlq: DMJTA1.MAIN
+    BuildHome: /u/DMJTA1/zAppBuild
+    DBBRepo: git@github.com:jt-atkins/dbb-scripts-final.git
+    BUILDRepo: git@github.com:jt-atkins/dbb-zappbuild-final.git
+    MyRepo: git@github.com:${{ github.repository }}.git
+    MyBranch: main
+    MyWorkDir: /u/DMJTA1/zAppBuild/featurebuild/Genapp_run_${{ github.run_number }}
+    # MyWorkSpace: /u/DMJTA1/zAppBuild/featurebuild/Genapp_run_${{ github.run_number }}/GenappML2
+    MyWorkSpace: /u/DMJTA1/zAppBuild/featurebuild/Genapp_run_${{ github.run_number }}
+    MyApplication: cics-genapp #application folder name under the working tree in the application Git repo
+    Clone: /u/DMJTA1/zAppBuild/scripts/git-clone-ssh.sh
+    DBB_Build: /u/DMJTA1/zAppBuild/scripts/dbb-build.sh
+    UCD_Package: /u/DMJTA1/zAppBuild/scripts/PublishUCD.sh
+    UCD_Deploy: /u/DMJTA1/zAppBuild/scripts/DeployUCD.sh
+    UCD_Server_URL: https://9.76.61.225:8443
+    UCD_AppProps: /u/DMJTA1/zAppBuild/dbb-zappbuild-final/GenappML2.properties
+    UCD_AppDeployProcess: Deploy
+    UCD_backendComponent: App1-Genapp-ZComponent
+    UCD_APIComponent: App1-Genapp-API
+    UCD_TestComponent: App1-Genapp-Test
+    UCDApplication: App1-Genapp
+    UCD_Dev_LPAR: 'DEV'
+    UCD_Test_LPAR: 'TEST'
+    UCD_Prod_LPAR: 'PROD'
+
+concurrency:
+    group: Main-Branch
+    
+#on:
+#  push:
+#    branches:
+#      - "main"
+#    paths:
+#      - "**.cbl"
+on:
+  push:
+    branches:
+      - "main"
+    paths:
+      - "**.cbl"
+
+jobs:
+  Main-Branch-Build-on-Merges:
+    runs-on: build-runner1
+    steps:
+      - name: Cleanup App Workspace
+        run: ${{ env.DBB_Host }} rm -rf ${{ env.MyWorkDir }}  
+        shell: cmd 
+
+      - name: Wait
+        run: sleep 5
+        
+      - name: Cleanup Build Workspace
+        run: ${{ env.DBB_Host }} rm -rf ${{ env.BuildHome }}/dbb-scripts-final ${{ env.BuildHome }}/dbb-zappbuild-final
+        shell: cmd 
+        
+          
+      - name: Clone Developer Branch to z/OS
+        run: ${{ env.DBB_Host }} ${{ env.Clone }} ${{ env.MyRepo }} ${{ env.MyWorkDir }} ${{ env.MyWorkSpace }}/${{ env.AppName }} ${{ env.MyBranch }}
+        shell: cmd
+
+      - name: Wait
+        run: sleep 5
+
+      - name: Clone DBB Supporting Scripts to z/OS      
+        run: ${{ env.DBB_Host }} ${{ env.Clone }} ${{ env.DBBRepo }} ${{ env.BuildHome }} . main
+        shell: cmd
+
+      - name: Wait
+        run: sleep 5
+        
+      - name: Clone zAppBuild Repo to z/OS      
+        run: ${{ env.DBB_Host }} ${{ env.Clone }} ${{ env.BUILDRepo }} ${{ env.BuildHome }} . main
+        shell: cmd
+        
+      - name: Checkout Repository to Read latest Production Tag
+        uses: actions/checkout@v2
+        
+      - name: Read Tag From File and Store in Variable
+        id: readfile
+        uses: actions/github-script@v6
+        with:
+          script: |
+              const fs = require('fs');
+              try {
+                const tag = fs.readFileSync('TAG.txt', 'utf8');
+                console.log(`Tag value is ${tag}`);
+                core.setOutput('tag', tag);
+              } catch (error) {
+                console.log('You need to work on a valid feature branch with a TAG.txt, please branch from Main again');
+                core.setFailed('TAG.txt file not found');
+              }
+            
+      - name: The Production Tag to be Used for Build
+        if: success()
+        run: echo "The previous production release tag value is ${{ steps.readfile.outputs.tag }}"              
+        
+      - name: Main DBB Impact Build Based on Previous Production Tag
+   #     run: ${{ env.DBB_Host }} ${{ env.DBB_Build }} ${{ env.MyWorkDir }} ${{ env.MyWorkSpace }}/${{ env.AppName }} ${{ env.MyApplication }} ${{ env.MyHlq }}.${{ steps.hlq.outputs.substring }} --impactBuild --verbose ${{ env.MyWorkSpace }}/${{ env.AppName }}:${{ steps.readfile.outputs.tag }}
+        run: ${{ env.DBB_Host }} ${{ env.DBB_Build }} ${{ env.MyWorkDir }} ${{ env.MyWorkSpace }}/${{ env.AppName }} ${{ env.MyApplication }} ${{ env.MyHlq }} -i  -b ${{ steps.readfile.outputs.tag }}        
+   #     run: ${{ env.DBB_Host }} ${{ env.DBB_Build }} ${{ env.MyWorkDir }} ${{ env.MyWorkSpace }}/${{ env.AppName }} ${{ env.MyApplication }} ${{ env.MyHlq }}.${{ steps.hlq.outputs.substring }} -i  -b origin/main
+        shell: cmd 

@@ -1,0 +1,27 @@
+plugins {
+  id 'biz.aQute.bnd.builder' version "6.3.0"
+}
+
+repositories {
+  mavenCentral()
+}
+
+sourceCompatibility = 1.8
+
+jar {
+    bundle{
+        bnd (
+                'Bundle-SymbolicName': 'com.ibmzpot.genapp',
+                'Import-Package': 'javax.ejb;resolution:=optional, *'
+        )
+    }
+}
+
+dependencies {
+  implementation project(':ibmzpot-common')
+  compileOnly enforcedPlatform('com.ibm.cics:com.ibm.cics.ts.bom:6.1-20220617120000')
+  compileOnly('com.ibm.cics:com.ibm.cics.server')
+  compileOnly('com.ibm.cics:com.ibm.cics.server.invocation.annotations')
+  annotationProcessor enforcedPlatform('com.ibm.cics:com.ibm.cics.ts.bom:6.1-20220617120000')
+  annotationProcessor('com.ibm.cics:com.ibm.cics.server.invocation')
+}

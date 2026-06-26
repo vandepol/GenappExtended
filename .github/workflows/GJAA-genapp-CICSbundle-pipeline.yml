@@ -1,0 +1,76 @@
+name: Java-z-Build
+env:
+    AppName: GenappExtended
+    DBB_Host: '"C:\Program Files\PuTTY\plink.exe" DMJTA1@WTSC47.CPOLAB.IBM.COM -pw ${{ secrets.WTSC47_PW }}'
+    MyRepo: git@github.com:${{ github.repository }}.git
+    MyBranch: ${{ github.ref }}
+    # MyWorkDir: /u/DMJTA1/zAppBuild/javabuild/Genapp_run_${{ github.run_number }}    
+    MyWorkDir: /u/DMJTA1/zAppBuild/javabuild
+    
+    # MyWorkSpace: /u/DMJTA1/zAppBuild/featurebuild/Genapp_run_${{ github.run_number }}/GenappExtended
+    MyWorkSpace: /u/DMJTA1/zAppBuild/javabuild/Genapp_run_${{ github.run_number }}
+    MyApplication: cics-genapp #application folder name under the working tree in the application Git repo
+    Clone: /u/DMJTA1/zAppBuild/scripts/git-clone-ssh.sh
+    
+    
+    UCD_Server_URL: https://9.76.61.225:8443
+    UCD_AppProps: /u/DMJTA1/zAppBuild/dbb-zappbuild-final/GenappML2.properties
+    UCD_AppDeployProcess: Deploy
+    UCD_backendComponent: App1-Genapp-ZComponent
+    UCD_JavaComponent: App1-Genapp-Java
+    UCDApplication: App1-Genapp
+    UCD_Dev_LPAR: 'DEV'
+    UCD_Test_LPAR: 'TEST'
+    UCD_Prod_LPAR: 'PROD'
+
+    Package: /u/DMJTA1/zAppBuild/scripts/packageUCD.sh
+    ShipGen: /u/DMJTA1/zAppBuild/scripts/shiplistgen.sh
+    JavaBuild: /u/DMJTA1/zAppBuild/scripts/java-build.sh 
+    UCD_Deploy: /u/DMJTA1/zAppBuild/scripts/DeployUCD.sh
+    ProjHome: GenappExtended/cics-genapp/base/src/JAVA/
+    BuildProj: GJAA-genapp 
+    JavaVersion: 1.0.0 
+    JVMServer: OSGCOB2
+    BundleDIR: GJAA-genapp-cicsbundle/build
+    
+
+on:
+  push:
+    paths:
+      - '**/JAVA/GJAA-genapp/**'
+      - '**/JAVA/GJAA-genapp/*'
+      
+concurrency:
+    group: Main-Java-Build
+    
+jobs:
+  Main-Java-Build:
+    runs-on: build-runner1
+    steps:
+      - name: Cleanup App Workspace
+        run: ${{ env.DBB_Host }} rm -rf ${{ env.MyWorkSpace }}  
+        shell: cmd 
+        
+      - name: Clone Developer Branch to z/OS
+        run:  ${{ env.DBB_Host }} ${{ env.Clone }} ${{ env.MyRepo }}  ${{ env.MyWorkSpace }}  ${{ env.MyWorkSpace }}/${{ env.AppName }} ${{ env.MyBranch }}
+        shell: cmd
+
+      - name: Build Java on z/OS
+        run:  ${{ env.DBB_Host }} ${{ env.JavaBuild }}  /Genapp_run_${{ github.run_number }}/${{ env.ProjHome }}${{ env.BuildProj }}  ${{ env.JavaVersion }}   ${{ env.JVMServer }}  
+        shell: cmd
+
+  #   - name: Zip build output on z/OS
+   #     run: ${{ env.DBB_Host }} ". $HOME/.profile; zip" -r ${{ env.MyWorkSpace }}/${{ env.ProjHome }}${{ env.BuildProj }}.zip ${{ env.MyWorkSpace }}/${{ env.ProjHome }}${{ env.BuildProj }}
+    #    shell: cmd
+
+      - name: Create package manifest 
+        run: ${{ env.DBB_Host }} ${{ env.ShipGen }}  ${{ env.MyWorkSpace }}/${{ env.ProjHome }}${{ env.BuildProj }}/${{ env.BundleDIR }}  ${{ env.MyWorkSpace }}/${{ env.AppName }}/shiplist.xml
+        shell: cmd
+
+      - name: Package
+        run: ${{ env.DBB_Host }} ${{ env.Package }}  ${{ env.UCD_JavaComponent }} JavaBuild.${{ github.run_number }} ${{ env.MyWorkSpace }}/${{ env.AppName }}/shiplist.xml
+        shell: cmd
+
+      - name: Deployment to Applications DEV LPAR   
+        run: ${{ env.DBB_Host }} ${{ env.UCD_Deploy }} ${{ env.UCDApplication }}  ${{ env.UCD_Dev_LPAR }} ${{ env.UCD_Server_URL }} ${{ env.UCD_backendComponent }}:latest  ${{ env.UCD_AppDeployProcess }} ${{ env.UCD_AppProps }}
+        shell: cmd 

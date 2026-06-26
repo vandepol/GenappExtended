@@ -1,0 +1,79 @@
+name: On-Create-Branch
+env:
+  MyBranch: ${{ github.ref }}
+on:
+  create:
+    branches:
+      - 'G*'
+      - 'v*'
+      - 'e*'
+      
+concurrency:
+    group: Main-Branch
+
+jobs:
+  create-branch-rules:
+    runs-on: ubuntu-latest
+#    outputs:
+#      commitFailed: ${{ steps.check-failure.outputs.commitFailed }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          
+ # if [[ $MyBranch == refs/heads/main || $MyBranch == refs/tags/* ]]; then
+      - name: Check branch name
+        run: |
+          MyBranch=${{ github.ref }}
+          echo "Current git reference is: $MyBranch"
+          # Check if the reference is a tag or the main branch
+           if [[ $MyBranch == refs/heads/main ]]; then
+            echo "Reference is 'main'. Stopping workflow."
+            exit 1
+          fi
+          
+  #    - name: Get previous tag
+  #      id: previoustag
+  #      uses: WyriHaximus/github-action-get-previous-tag@v1
+
+      - name: Get previous tag
+        id: previoustag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh api repos/jt-atkins/GenappML2/releases | jq -r '.[] | select(.prerelease == false) | .tag_name' | sort -Vr | sed -n '1p')         
+          echo "::set-output name=tag::$tag"
+
+      - name: Create file with tag
+        run: echo "${{ steps.previoustag.outputs.tag }}" > TAG.txt
+      - name: Commit and push changes
+        id: commit
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add TAG.txt
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Add TAG.txt with latest tag"
+            git push
+          fi
+          
+      - name: info
+        run: |
+          echo "Event Name: ${{ github.event_name }}"
+          echo "Branch Ref: ${{ github.ref }}"
+          
+      - name: Delete new branch on failure
+        if: failure()
+        env:
+          GITHUB_TOKEN: github_pat_11BBBMNYI0XLAoDVDYJbDh_Qdc3ryPRmMHsBrUJsglr4iATjmOa2uxrjOgLnHi5AX1VDMI2X5YvWHNIwJ
+        run: |
+          # Insert your cleanup commands here
+          echo "Running cleanup due to failure in previous steps."
+          # For example, delete remote branch
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          curl -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+               "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs/heads/$BRANCH_NAME"

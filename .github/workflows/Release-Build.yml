@@ -1,0 +1,147 @@
+name: Release-Candidate-Build
+env:
+    AppName: GenappExtended
+    DBB_Host: '"C:\Program Files\PuTTY\plink.exe" DMJTA1@WTSC47.CPOLAB.IBM.COM -pw ${{ secrets.WTSC47_PW }}'
+    MyHlq: DMJTA1
+    # Make this a user input
+    # ReleaseHLQ: REL
+    # OPTparms: ARCH=12
+    BuildHome: /u/DMJTA1/zAppBuild
+    DBBRepo: git@github.com:jt-atkins/dbb-scripts-final.git
+    BUILDRepo: git@github.com:jt-atkins/dbb-zappbuild-final.git
+    MyRepo: git@github.com:${{ github.repository }}.git
+    # MyBranch: ${{ github.ref }}
+    MyWorkDir: /u/DMJTA1/zAppBuild/releasebuild/Genapp_run_${{ github.run_number }}
+    # MyWorkSpace: /u/DMJTA1/zAppBuild/featurebuild/Genapp_run_${{ github.run_number }}/GenappExtended
+    MyWorkSpace: /u/DMJTA1/zAppBuild/releasebuild/Genapp_run_${{ github.run_number }}
+    MyApplication: cics-genapp #application folder name under the working tree in the application Git repo
+    Clone: /u/DMJTA1/zAppBuild/scripts/git-clone-ssh.sh
+    DBB_Build: /u/DMJTA1/zAppBuild/scripts/release-dbb-build.sh
+    UCD_Package: /u/DMJTA1/zAppBuild/scripts/ReleasePublishUCD.sh
+    # UCD_Package: /u/DMJTA1/zAppBuild/scripts/PublishUCD.sh
+    UCD_Deploy: /u/DMJTA1/zAppBuild/scripts/DeployUCD.sh
+    UCD_Server_URL: https://9.76.61.225:8443
+    UCD_AppProps: /u/DMJTA1/zAppBuild/dbb-zappbuild-final/GenappML2.properties
+    UCD_AppDeployProcess: Deploy
+    UCD_backendComponent: App1-Genapp-ZComponent
+    UCD_APIComponent: App1-Genapp-API
+    UCD_TestComponent: App1-Genapp-Test
+    UCDApplication: App1-Genapp
+    UCD_Dev_LPAR: 'DEV'
+    UCD_Test_LPAR: 'QA'
+    UCD_Prod_LPAR: 'PROD'
+
+concurrency:
+    group: Main-Branch
+    cancel-in-progress: true
+      
+on:
+  release:
+    types: [prereleased]
+      
+jobs:
+  Release-Candidate-Build:
+    runs-on: build-runner1
+    if: github.event.release.prerelease == true
+    steps:
+      - name: Cleanup App Workspace
+        run: ${{ env.DBB_Host }} rm -rf ${{ env.MyWorkDir }}  
+        shell: cmd 
+
+      - name: Wait
+        run: sleep 5
+        
+      - name: Cleanup Build Workspace
+        run: ${{ env.DBB_Host }} rm -rf ${{ env.BuildHome }}/dbb-scripts-final ${{ env.BuildHome }}/dbb-zappbuild-final
+        shell: cmd
+
+      - name: Retrieve Draft Release Tag Version Number
+        uses: mad9000/actions-find-and-replace-string@3
+        id: getTag
+        with:
+          source: "${{ github.ref }}"
+          find: 'refs/tags/'        
+          replace: ''
+        
+      - name: Retrieve Draft Release Tag Version Number Minus Spaces
+        uses: mad9000/actions-find-and-replace-string@3
+        id: Tag
+        with:
+          source: "${{ steps.getTag.outputs.value }}"
+          find: ' '        
+          replace: ''
+          replaceAll: true
+
+      - name: Clone ${{ steps.Tag.outputs.value }} from Main Branch to z/OS
+        run: ${{ env.DBB_Host }} ${{ env.Clone }} ${{ env.MyRepo }} ${{ env.MyWorkDir }} ${{ env.MyWorkSpace }}/${{ env.AppName }} ${{ steps.Tag.outputs.value }}
+        shell: cmd
+        
+      - name: Wait
+        run: sleep 5
+
+      - name: Clone DBB Supporting Scripts to z/OS      
+        run: ${{ env.DBB_Host }} ${{ env.Clone }} ${{ env.DBBRepo }} ${{ env.BuildHome }} . main
+        shell: cmd
+
+      - name: Wait
+        run: sleep 5
+        
+      - name: Clone zAppBuild Repo to z/OS      
+        run: ${{ env.DBB_Host }} ${{ env.Clone }} ${{ env.BUILDRepo }} ${{ env.BuildHome }} . main
+        shell: cmd
+
+      - name: Checkout the repo to read the TAG.txt file
+        uses: actions/checkout@v2
+        
+      - name: Read Previous successful Production Tag From File and Set as Output
+        id: readfile
+        uses: actions/github-script@v6
+        with:
+          script: |
+              const fs = require('fs');
+              try {
+                const tag = fs.readFileSync('TAG.txt', 'utf8');
+                console.log(`Tag value is ${tag}`);
+                core.setOutput('tag', tag);
+              } catch (error) {
+                console.log('You need to work on a valid feature branch with a TAG.txt, please branch from Main again');
+                core.setFailed('TAG.txt file not found');
+              }
+
+      - name: The Previous Successful Production Tag to be Used for Release Impact Build
+        if: success()
+        run: echo "The previous production release tag value is ${{ steps.readfile.outputs.tag }} which will be used as a baseline for the DBB impact build"                
+
+      - name: DBB Impact Build with Optimisation Based on Previous Production Tag
+ #       run: ${{ env.DBB_Host }} ${{ env.DBB_Build }} ${{ env.MyWorkDir }} ${{ env.MyWorkSpace }}/${{ env.AppName }} ${{ env.MyApplication }} ${{ env.MyHlq }} --impactBuild --verbose ${{ env.MyWorkSpace }}/${{ env.AppName }}:${{ steps.readfile.outputs.tag }}
+        run: ${{ env.DBB_Host }} ${{ env.DBB_Build }} ${{ env.MyWorkDir }} ${{ env.MyWorkSpace }}/${{ env.AppName }} ${{ env.MyApplication }} ${{ env.MyHlq }} -i  -b ${{ steps.readfile.outputs.tag }}
+        shell: cmd     
+
+      - name: Capture Release Tag From the Draft Release Created to Trigger This Workflow
+        id: capture_tag
+        run: echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+
+      - name: Preparing Packaging Process
+        run: echo "About to Run packaging tasks for pre-release with tag ${{ steps.Tag.outputs.value }}"
+
+ #     - name: Delete Previous Release Candidate Version (if it exists) 
+ #       run: |
+ #            curl -k -u admin:admin "https://9.76.61.225:8443/cli/version/deleteVersion?component=${{ env.UCD_backendComponent }}&version=${{ steps.Tag.outputs.value }}" -H "Accept: application/json" -X PUT || exit 0          
+        
+ #     - name: Delete Previous Release Candidate Version (if it exists)
+ #       shell: pwsh
+ #       run: |
+  #       $ErrorActionPreference = 'SilentlyContinue'
+  #       curl -k -u admin:admin "https://9.76.61.225:8443/cli/version/deleteVersion?component=${{ env.UCD_backendComponent }}&version=${{ steps.Tag.outputs.value }}" -H "Accept: application/json" -X PUT
+  #       $ErrorActionPreference = 'Stop'
+
+      - name: Package
+     #   run: ${{ env.DBB_Host }} ${{ env.UCD_Package }} ${{ steps.readfile.outputs.tag }}.Build.${{ github.run_number }}  ${{ env.UCD_backendComponent }}  ${{ env.MyWorkDir }} ${{ env.UCD_AppProps }}
+     #   run: ${{ env.DBB_Host }} ${{ env.UCD_Package }} ${{ env.UCD_backendComponent }}  ${{ env.MyWorkDir }} ${{ env.UCD_AppProps }} ${{ steps.Tag.outputs.value }}
+        run: ${{ env.DBB_Host }} ${{ env.UCD_Package }} ${{ env.UCD_backendComponent }}  ${{ env.MyWorkDir }} ${{ steps.Tag.outputs.value }}
+        shell: cmd 
+
+      - name: Deployment to Applications QA LPAR   
+        run: ${{ env.DBB_Host }} ${{ env.UCD_Deploy }} ${{ env.UCDApplication }}  ${{ env.UCD_Test_LPAR }} ${{ env.UCD_Server_URL }} ${{ env.UCD_backendComponent }}:${{ steps.Tag.outputs.value }}  ${{ env.UCD_AppDeployProcess }} ${{ env.UCD_AppProps }}
+        shell: cmd 
+        
